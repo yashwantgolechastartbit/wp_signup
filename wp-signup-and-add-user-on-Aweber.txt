@@ -1,0 +1,165 @@
+<?php
+
+add_shortcode( 'wp-custom-signups', 'wp_custom_signups_form' );
+
+function wp_custom_signups_form() {
+	if(is_user_logged_in()){
+		global $current_user;
+		$output = 'Hi '.$current_user->user_login;
+		$output .= '<div><a href="'.wp_logout_url().'">Logout</a></div>';
+		}else{
+    $output = '<div id="wp-registration" class="wp-registration">';
+    $output .= '<h2>'.__('Registration', 'wp-custom-signup').'</h2>';
+    $output .= '<form method="post" action="">';
+    $output .= '<div class="reg-fields">';
+    $output .= '<label for="first name">'.__('First Name', 'wp-custom-signup').'<span class="show_required"> *</span></label>';
+    $output .= '<input type="text" id="fName" name="fName" value="" placeholder="First Name">';
+    $output .= '</div>';
+    $output .= '<div class="reg-fields">';
+    $output .= '<label for="last name">'.__('Last Name', 'wp-custom-signup').'<span class="show_required"> *</span></label>';
+    $output .= '<input type="text" id="lName" name="lName" value="" placeholder="Last Name">';
+    $output .= '</div>';
+    $output .= '<div class="reg-fields">';
+    $output .= '<label for="email">'.__('Email', 'wp-custom-signup').'<span class="show_required"> *</span></label>';
+    $output .= '<input type="email" id="Email" name="Email" value="" required placeholder="Email">';
+    $output .= '</div>';
+    $output .= '<div class="reg-fields">';
+    $output .= '<label for="password">'.__('Password', 'wp-custom-signup').'<span class="show_required"> *</span></label>';
+    $output .= '<input type="password" id="PWD" name="PWD" value="" placeholder="Password">';
+    $output .= '</div>';
+    $output .= '<div class="submit-button">';
+    $output .= '<input type="submit" id="customReg" value="'.__('Register', 'wp-custom-signup').'">';    
+    $output .= '<span id="spinLoading" style="display:none; position:relative;"><img src="'.plugins_url('loader.gif', __FILE__).'" style="bottom: 2px; position: absolute; right: -44px; width: 32px;"></span>';
+    $output .= '</div>';
+    $output .= '<div class="error" style="display:none; color:#fff;clear: both; margin: 12px; padding-top: 17px; text-align: center;"></div>';
+    $output .= '</form>';
+    $output .= '</div>';    
+    }
+    return $output;
+}
+
+add_action( 'wp_ajax_nopriv_custom_registration_ajax', 'wp_custom_save_cuser' );
+
+function wp_custom_save_cuser(){
+  $user_cdata = $_REQUEST['cinfo'];
+  
+  if($user_cdata['vfName'] == ''){
+   echo 'First Name is required!';
+   die;
+  }  
+  if($user_cdata['vemail'] == ''){
+   echo 'Email is required!';
+   die;
+  }  
+  if($user_cdata['vpwd'] == ''){
+   echo 'Password is required!';
+   die;
+  }
+    
+  if ( email_exists( $user_cdata['vemail'] ) ) {
+  	  echo $user_cdata['vemail'].' is already exist!';
+  	  exit;
+  	}
+  	
+  	if($user_cdata['vlName'])
+  		$display_name = $user_cdata['vfName'].' '.$user_cdata['vlName'];
+  	else 
+      $display_name = $user_cdata['vfName'];
+      
+$userdata = array(
+    'user_login'  => $user_cdata['vemail'],
+    'user_email'    =>  $user_cdata['vemail'],
+    'first_name'   =>  $user_cdata['vfName'],
+    'last_name'   =>  $user_cdata['vlName'],
+    'user_pass'    => $user_cdata['vpwd'],
+    'display_name' => $display_name
+);
+
+$user_id = wp_insert_user( $userdata ) ;
+
+//On success
+if ( ! is_wp_error( $user_id ) ) {
+    echo "success";
+    
+    add_user_to_aweber_account($display_name, $user_cdata['vemail'] );  // add user on Aweber email marketing
+    
+    wp_set_current_user($user_id); // for auto-login
+    wp_set_auth_cookie($user_id);
+}
+  wp_die();
+}
+
+function add_user_to_aweber_account($name, $email){
+
+require_once(plugin_dir_path( __FILE__ ).'aweber_api/aweber_api.php');
+
+$consumerKey    = "CONSUMER_KEY";  // Replace with the actual keys
+$consumerSecret = "CONSUMER_SECRET";
+$accessKey      = "ACCESS_KEY";
+$accessSecret   = "ACCESS_SECRET";
+$account_id     = "ACCOUNT_ID";
+$list_id        = "LIST_ID";
+
+$aweber = new AWeberAPI($consumerKey, $consumerSecret);
+$aweber->adapter->debug = false;
+
+try {
+    $account = $aweber->getAccount($accessKey, $accessSecret);
+    $listURL = "/accounts/{$account_id}/lists/{$list_id}";
+    $list = $account->loadFromUrl($listURL);
+
+    # create a subscriber
+    $params = array(
+        'email' => $email,
+        'ip_address' => '127.0.0.1',
+        'ad_tracking' => 'client_lib_example',
+        'misc_notes' => 'website user signups',
+        'name' => $name,        
+        'tags' => array(),
+    );
+    $subscribers = $list->subscribers;
+    $new_subscriber = $subscribers->create($params);
+    
+    } catch(AWeberAPIException $exc) {    
+    exit(1);
+  }
+}
+
+add_action( 'wp_footer', 'wp_custom_registration_ajax' );
+
+function wp_custom_registration_ajax(){ ?>
+<script type="text/javascript">
+jQuery(document).ready(function($){
+	$('#customReg').click(function (e) {
+		e.preventDefault();
+		 var vfName = $('#fName').val();
+		 var vlName = $('#lName').val();
+		 var vemail = $('#Email').val();
+		 var vpwd = $('#PWD').val();
+		  $('#spinLoading').css('display','block');
+		  $('#irform').css('opacity', .5);
+		$.post(
+		    '<?php echo admin_url( "admin-ajax.php" ); ?>', 
+		    {
+		        'action': 'custom_registration_ajax',
+		        'cinfo':   {'vfName':vfName, 'vlName':vlName, 'vemail':vemail, 'vpwd':vpwd}
+		    }, 
+		    function(response){
+		    	$('#spinLoading').hide();
+		    	$('#irform').css('opacity', 1);
+		      if (response == 'success') {
+			 		$('.error').css('color','#fff');
+			 		$('.error').show().text('Registration successful. Logged in now. Please wait..');
+			 		location.replace('<?php echo get_permalink(11946); ?>');
+			 	    }else{ 	
+			       $('.error').show().text(response);
+			    }
+		    }
+		  );
+
+	});
+	
+});
+</script>
+<?php 
+}
